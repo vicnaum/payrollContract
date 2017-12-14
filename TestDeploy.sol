@@ -1,7 +1,7 @@
 pragma solidity ^0.4.18;
 
 import './EURToken.sol';
-import './Payroll.sol'
+import './Payroll.sol';
 
 contract Init {
 
