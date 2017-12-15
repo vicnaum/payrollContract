@@ -3,6 +3,10 @@ pragma solidity ^0.4.18;
 import './EURToken.sol';
 
 // For the sake of simplicity lets assume EUR is a ERC20 token 
+//
+// Not using SafeMath, because as far as I can see - every possible attack vector comes from the Owner,
+// and we assume the Owner is wise, and don't do any checks for incorrect inputs
+// (for the purposes of this test)
 contract Payroll { 
     EURToken tokenContract;
 
@@ -82,9 +86,8 @@ contract Payroll {
 
     // If someone unintentionally/maliciously sent ETH to the contract - this can withdraw it
     function withdrawEther() external onlyOwner {
-        if (address(this).balance > 0) {
-            msg.sender.transfer(address(this).balance);
-        }
+        require(address(this).balance > 0);
+        msg.sender.transfer(address(this).balance);
     }
 
     // Adds an employee with specified yearly salary
