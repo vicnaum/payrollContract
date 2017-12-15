@@ -3,14 +3,16 @@ pragma solidity ^0.4.18;
 import './EURToken.sol';
 
 // For the sake of simplicity lets assume EUR is a ERC20 token 
-// Also lets assume we can 100% trust the exchange rate oracle 
 contract Payroll { 
     EURToken tokenContract;
 
-    //uint public month = 30 days;   // Assuming month is 30 days
-    uint public month = 30 seconds;   // (or 30 seconds for testing purposes)
-    uint public year = month * 12; // And year is 12 months
-    uint public paydayFrequency = 1*month; // How frequently an employee can withdraw funds
+    uint public periodUnit = 1 days;         // Minimal period unit - default 1 day
+//    uint public periodUnit = 1 seconds;        // (or 1 second for testing purposes)
+    uint public daysInMonth = 30;              // Default month - 30 days
+    uint public monthsInYear = 12;             // Default year - 12 months
+    uint public month = daysInMonth * periodUnit;
+    uint public year = month * monthsInYear;
+    uint public paydayFrequency = 1 * month;     // How frequently an employee can withdraw funds
     
     address public owner;
     
@@ -169,16 +171,18 @@ contract Payroll {
     function calculatePayrollBurnrate() public view returns (uint256) {
         uint sum;
         for (uint i=0; i<employees.length; i++) {
-            sum += employees[i].salary;
+            if (employees[i].endedWorkingTS < employees[i].startedWorkingTS) { // Check if employee wasn't fired
+                sum += employees[i].salary;
+            }
         }
-        return sum / 12;
+        return sum / monthsInYear;
     }
     
     // Days until the contract can run out of funds 
     //
     // TODO: Take into account current employees pending Payments
     function calculatePayrollRunway() public view returns (uint256) {
-        return tokenContract.balanceOf(address(this)) / (calculatePayrollBurnrate()/30);
+        return tokenContract.balanceOf(address(this)) / (calculatePayrollBurnrate()/daysInMonth);
     }
     
     // Called before something related to employee money is about to change (new salary, fire, payday)
@@ -205,11 +209,23 @@ contract Payroll {
         uint amount = employees[employeeID].pendingPayment;
         
         require(amount > 0); // Has something to withdraw
-        require(amount < tokenContract.balanceOf(address(this))); // Contract has enough tokens to pay
+        uint contractBalance = tokenContract.balanceOf(address(this));
         
-        employees[employeeIDs[msg.sender]].pendingPayment = 0;
-        tokenContract.transfer(msg.sender, amount);
-        LogPayday(msg.sender, employeeID, amount);
+        if (amount < contractBalance) { // If contract has enough funds to pay - then just pay
+            employees[employeeIDs[msg.sender]].pendingPayment = 0;
+            tokenContract.transfer(msg.sender, amount);
+            LogPayday(msg.sender, employeeID, amount);            
+        } else {  // If not - pay what we have, and leave the rest in pending
+            uint pending = amount - contractBalance;
+            amount = contractBalance;
+            
+            employees[employeeIDs[msg.sender]].pendingPayment = pending;
+            lastPaydayCall[employeeID] = now - paydayFrequency; // Allow employee to withdraw rest of pending funds instantly
+            
+            tokenContract.transfer(msg.sender, amount);
+            LogPayday(msg.sender, employeeID, amount);
+        } 
+        
     }
 
     /* ORACLE ONLY */
@@ -226,5 +242,4 @@ contract Payroll {
     function getBalance() external view returns (uint) {
         tokenContract.balanceOf(address(this));
     }
-
 }
