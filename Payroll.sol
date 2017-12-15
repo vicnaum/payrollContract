@@ -7,7 +7,8 @@ import './EURToken.sol';
 contract Payroll { 
     EURToken tokenContract;
 
-    uint public month = 30 days;   // Assuming month is 30 days
+    //uint public month = 30 days;   // Assuming month is 30 days
+    uint public month = 30 seconds;   // (or 30 seconds for testing purposes)
     uint public year = month * 12; // And year is 12 months
     uint public paydayFrequency = 1*month; // How frequently an employee can withdraw funds
     
@@ -77,8 +78,18 @@ contract Payroll {
         LogWithdraw(msg.sender, _value);
     }
 
-    // TODO: Figure out what to do if the employee already worked in the past and was fired
-    // TODO: Do we need to check for a duplicate? Or that's the solution for fired past workers?
+    // If someone unintentionally/maliciously sent ETH to the contract - this can withdraw it
+    function withdrawEther() external onlyOwner {
+        if (address(this).balance > 0) {
+            msg.sender.transfer(address(this).balance);
+        }
+    }
+
+    // Adds an employee with specified yearly salary
+    //
+    // TODO: Currently can add multiple same-address employees.
+    //       That's good if you fire and rehire again. But contract pays only the last one.
+    //       Maybe needs to check if all previous inclusions were fired?
     function addEmployee(
         address _accountAddress,
         uint256 _initialYearlyEURSalary)
@@ -100,9 +111,11 @@ contract Payroll {
         LogEmployeeAdded(_accountAddress, employeeID, _initialYearlyEURSalary);
     }
     
+    // Fires an employee by ID, and calculates their exit paycheck
     function removeEmployee(uint256 employeeID) external
         onlyOwner {
         Employee storage employee = employees[employeeID];
+        require(employee.endedWorkingTS < employee.startedWorkingTS); // Check if employee wasn't already fired
         employee.endedWorkingTS = now;
         recalculatePending(employeeID);
         
@@ -111,6 +124,7 @@ contract Payroll {
         LogEmployeeRemoved(employee.accountAddress, employeeID, employee.pendingPayment);
     }
 
+    // Changes employee ID salary, summing up the earnings before the change occured
     function setEmployeeSalary(
         uint256 employeeID,
         uint256 newYearlyEURSalary)
@@ -122,12 +136,14 @@ contract Payroll {
         LogSalaryChange(employee.accountAddress, employeeID, newYearlyEURSalary);
     }
     
+    // Emergency withdrawal of all tokens owned by contract
     function EscapeHatch() external onlyOwner {
         uint amount = tokenContract.balanceOf(address(this));
         tokenContract.transfer(owner, amount);
         LogEscapeHatchUse(owner, amount);
     }
-    
+
+
     ///////////////
     /*  GETTERS  */
     ///////////////
@@ -159,11 +175,13 @@ contract Payroll {
     }
     
     // Days until the contract can run out of funds 
+    //
+    // TODO: Take into account current employees pending Payments
     function calculatePayrollRunway() public view returns (uint256) {
         return tokenContract.balanceOf(address(this)) / (calculatePayrollBurnrate()/30);
     }
     
-    // Called when something related to employee money changes (salary, fire, payday)
+    // Called before something related to employee money is about to change (new salary, fire, payday)
     function recalculatePending(uint employeeID) internal {
         Employee storage employee = employees[employeeID];
         uint endTS = (employee.endedWorkingTS > employee.startedWorkingTS) ? employee.endedWorkingTS : now;
@@ -176,7 +194,7 @@ contract Payroll {
     /* EMPLOYEE ONLY */
     ///////////////////
     
-    // only callable once a month 
+    // only callable once a period (month)
     function payday() public onlyEmployee(msg.sender) {
         uint employeeID = employeeIDs[msg.sender];
         
